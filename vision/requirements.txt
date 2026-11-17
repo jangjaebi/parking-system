@@ -1,0 +1,7 @@
+opencv-python
+pytesseract
+numpy
+requests
+gpiozero
+# 라즈베리파이: Tesseract 본체는 따로 설치 → sudo apt install tesseract-ocr
+# 서보 떨림 줄이기(선택): sudo apt install pigpio python3-pigpio
