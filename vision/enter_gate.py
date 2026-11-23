@@ -37,7 +37,7 @@ SERVO_CLOSED_ANGLE = 0
 # 센서는 차단봉 바로 옆에서 차로를 가로질러 보도록 설치 (차가 차단봉 앞에 서 있으면 감지됨)
 TRIG_PIN = 23                # hardware/ultrasonic.py와 같은 핀
 ECHO_PIN = 24                # ※ ECHO는 5V 출력 → 저항 분압(예: 1kΩ + 2kΩ)으로 3.3V로 낮춰 연결
-CAR_DISTANCE_CM = 10         # 이 거리보다 가까우면 '차 있음' (모형 차로 폭에 맞게 조정)
+CAR_DISTANCE_CM = 8         # 이 거리보다 가까우면 '차 있음' (모형 차로 폭에 맞게 조정)
 MIN_OPEN_SECONDS = 2         # 열린 뒤 최소 유지 시간 (센서 순간 오측정으로 바로 닫히는 것 방지)
 CLEAR_HOLD_SECONDS = 1.0     # 차가 안 보이는 상태가 이만큼 계속되면 '통과 완료'로 보고 닫음
 GATE_MAX_WAIT_SECONDS = 30   # 열고 나서 차가 계속 안 지나가면 경고 출력 간격
