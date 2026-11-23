@@ -10,3 +10,6 @@ backend/*.db
 .DS_Store
 .vscode/
 .idea/
+# Node
+frontend/node_modules/
+frontend/dist/
