@@ -1,4 +1,4 @@
-
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, send_from_directory
@@ -55,4 +55,7 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # debug=True로 0.0.0.0에 열면 같은 네트워크의 누구나 디버거로 코드를 실행할 수 있어 위험함
+    # 개발 중 디버그가 필요하면: FLASK_DEBUG=1 python app.py
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    app.run(host="0.0.0.0", port=5000, debug=debug, threaded=True)
