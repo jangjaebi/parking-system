@@ -5,22 +5,33 @@
 - 서버가 OPEN을 돌려주면 차단봉을 열고, 초음파 센서로 차가 지나간 것을 확인한 뒤 닫고 서버에 CLOSED 보고
 - USE_ULTRASONIC = False이면 예전 방식 (항상 OCR, 열고 GATE_OPEN_SECONDS 뒤 닫기)
 """
+import threading
 import time
 
 import cv2
 import requests
 
+from camera_util import BackgroundOcr, camera_index_from_args, open_camera
 from plate_ocr import read_4digit_plate
 
-# 라즈베리파이 실제 연결 시 True로 변경 (PC 테스트 시 False)
-USE_HARDWARE_SERVO = False
-# 초음파 센서(HC-SR04) 연결 시 True로 변경
-USE_ULTRASONIC = False
+# ── 하드웨어 사용 여부 (라즈베리파이에서 True, 노트북 테스트 시 False) ──
+USE_HARDWARE_SERVO = False   # 차단봉 서보모터 (SG90)
+USE_ULTRASONIC = False       # 초음파 센서 (HC-SR04)
+
+# ── 핀 번호 (BCM 번호 = 확장보드에 적힌 GPIO 번호) ──
+SERVO_PIN = 18               # 서보 신호선(주황/노랑) → GPIO18 (물리 12번 핀)
+TRIG_PIN = 23                # 초음파 Trig → GPIO23 (물리 16번 핀)
+ECHO_PIN = 24                # 초음파 Echo → GPIO24 (물리 18번 핀) ※ 저항 분압으로 3.3V로 낮춰 연결
+
+# ── 차단봉 각도 (hardware/servo_test.py로 모형에 맞는 값을 찾아서 적기) ──
+SERVO_CLOSED_ANGLE = 0       # 차단봉 내림 (가로)
+SERVO_OPEN_ANGLE = 90        # 차단봉 올림 (세로). 반대로 움직이면 두 값을 바꾸거나 OPEN을 180으로
+SERVO_MOVE_SECONDS = 0.6     # 움직인 뒤 이 시간이 지나면 신호를 끊어 '지지직' 떨림 방지
 # 카메라 화면 미리보기 창 (번호판 영역 맞출 때 True, 모니터 없는 라즈베리파이에서는 False)
 SHOW_PREVIEW = True
 
 SERVER_URL = "http://127.0.0.1:5000"
-ENTRY_CAM_INDEX = 0          # 입구 카메라 번호 (환경에 맞게 0 또는 1, 2로 조정)
+ENTRY_CAM_INDEX = 1        # 입구 카메라 번호 (환경에 맞게 0 또는 1, 2로 조정)
 
 # 번호판을 찾을 영역 (x1, y1, x2, y2). None이면 화면 전체
 # 화면 전체를 읽으면 주변 글자(벽, 종이 등)의 숫자를 번호판으로 착각할 수 있으니
@@ -30,14 +41,10 @@ PLATE_ROI = None             # 예: (160, 120, 480, 360)
 OCR_MIN_CONFIDENCE = 0.70    # 서버와 같은 기준
 GATE_OPEN_SECONDS = 5        # 차단봉 열림 유지 시간
 SAME_PLATE_COOLDOWN = 10     # 같은 번호판 재요청 간격(초)
-SERVO_OPEN_ANGLE = 90
-SERVO_CLOSED_ANGLE = 0
 
 # ── 초음파 센서 설정 ──
 # 센서는 차단봉 바로 옆에서 차로를 가로질러 보도록 설치 (차가 차단봉 앞에 서 있으면 감지됨)
-TRIG_PIN = 23                # hardware/ultrasonic.py와 같은 핀
-ECHO_PIN = 24                # ※ ECHO는 5V 출력 → 저항 분압(예: 1kΩ + 2kΩ)으로 3.3V로 낮춰 연결
-CAR_DISTANCE_CM = 8         # 이 거리보다 가까우면 '차 있음' (모형 차로 폭에 맞게 조정)
+CAR_DISTANCE_CM = 7         # 이 거리보다 가까우면 '차 있음' (모형 차로 폭에 맞게 조정)
 MIN_OPEN_SECONDS = 2         # 열린 뒤 최소 유지 시간 (센서 순간 오측정으로 바로 닫히는 것 방지)
 CLEAR_HOLD_SECONDS = 1.0     # 차가 안 보이는 상태가 이만큼 계속되면 '통과 완료'로 보고 닫음
 GATE_MAX_WAIT_SECONDS = 30   # 열고 나서 차가 계속 안 지나가면 경고 출력 간격
@@ -49,8 +56,10 @@ if USE_HARDWARE_SERVO:
     #   sudo pigpiod 실행 후 아래 두 줄 주석 해제
     # from gpiozero.pins.pigpio import PiGPIOFactory
     # from gpiozero import Device; Device.pin_factory = PiGPIOFactory()
-    servo = AngularServo(18, min_angle=0, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
-    servo.angle = SERVO_CLOSED_ANGLE  # 초기 상태: 닫힘
+    # SG90: 0.5ms = 0도, 2.5ms = 180도 (예전 코드는 0~90도로 잡혀 있어서 '90도'가 실제로는 180도 회전했음)
+    servo = AngularServo(SERVO_PIN, min_angle=0, max_angle=180,
+                         min_pulse_width=0.0005, max_pulse_width=0.0025,
+                         initial_angle=SERVO_CLOSED_ANGLE)  # 시작할 때 닫힘
 
 
 sensor = None
@@ -101,18 +110,24 @@ def wait_until_car_passes():
         time.sleep(0.1)
 
 
+_servo_timer = None
+
+
 def set_servo(angle):
-    if servo is not None:
-        servo.angle = angle
+    """서보를 angle도로 움직이고, 잠시 뒤 신호를 끊음 (SG90은 신호를 계속 주면 떨림)"""
+    global _servo_timer
+    if servo is None:
+        return
+    if _servo_timer is not None:
+        _servo_timer.cancel()
+    servo.angle = angle
+    _servo_timer = threading.Timer(SERVO_MOVE_SECONDS, servo.detach)
+    _servo_timer.daemon = True
+    _servo_timer.start()
 
 
-def flush_camera(cap, count=5):
-    """차단봉이 열려 있던 동안 쌓인 옛날 프레임 버리기"""
-    for _ in range(count):
-        cap.grab()
-
-
-def open_and_auto_close_gate(cap):
+def open_and_auto_close_gate():
+    """차단봉 열기 → 차 통과 대기 → 닫기 → 서버에 보고 (별도 스레드에서 실행되어 화면은 멈추지 않음)"""
     print(f">>> [서보모터] 입구 차단봉 열림 ({SERVO_OPEN_ANGLE}도)")
     set_servo(SERVO_OPEN_ANGLE)
     wait_until_car_passes()  # 초음파로 통과 확인 (센서 없으면 GATE_OPEN_SECONDS 대기)
@@ -124,8 +139,6 @@ def open_and_auto_close_gate(cap):
     except requests.RequestException as e:
         print("[서버 통신 오류] 차단봉 닫힘 보고 실패:", e)
 
-    flush_camera(cap)
-
 
 def crop_roi(frame):
     if PLATE_ROI is None:
@@ -134,12 +147,14 @@ def crop_roi(frame):
     return frame[y1:y2, x1:x2]
 
 
-def draw_preview(frame, plate, conf, has_car=True):
+def draw_preview(frame, plate, conf, has_car=True, gate_open=False):
     view = frame.copy()
     if PLATE_ROI is not None:
         x1, y1, x2, y2 = PLATE_ROI
         cv2.rectangle(view, (x1, y1), (x2, y2), (0, 200, 255), 2)
-    if not has_car:
+    if gate_open:
+        label = "GATE OPEN"
+    elif not has_car:
         label = "no car (sensor)"
     else:
         label = f"{plate} ({conf:.2f})" if plate else "no plate"
@@ -152,15 +167,22 @@ def draw_preview(frame, plate, conf, has_car=True):
 
 
 def main():
-    cap = cv2.VideoCapture(ENTRY_CAM_INDEX)
+    cam_index = camera_index_from_args(ENTRY_CAM_INDEX)  # python enter_gate.py 1 처럼 번호를 붙이면 그 카메라 사용
+    cap = open_camera(cam_index)
     if not cap.isOpened():
-        print(f"입구 카메라({ENTRY_CAM_INDEX}번)를 열 수 없습니다.")
+        print(f"입구 카메라({cam_index}번)를 열 수 없습니다. 카메라 번호 확인: python camera_util.py")
         return
 
     print("입구 OCR 카메라 및 차단봉 시스템 가동 시작...")
+    print(f"서보모터: {'GPIO ' + str(SERVO_PIN) if servo else '미사용 (터미널 출력만)'}")
     print(f"초음파 센서: {'사용 (' + str(CAR_DISTANCE_CM) + 'cm 이내 감지 시 OCR)' if sensor else '미사용 (항상 OCR)'}")
     last_checked_plate = None
     last_checked_time = 0.0
+    gate_thread = None
+
+    # OCR은 뒤에서 따로 돌림 → 화면은 카메라 속도 그대로, 차단봉이 열려 있는 동안에도 멈추지 않음
+    ocr = BackgroundOcr(lambda f: read_4digit_plate(crop_roi(f)))
+    ocr.start()
 
     try:
         while True:
@@ -169,24 +191,34 @@ def main():
                 time.sleep(0.5)
                 continue
 
-            # 프레임은 계속 읽어 카메라 버퍼를 최신으로 유지하고, OCR은 차가 있을 때만 실행
+            gate_open = gate_thread is not None and gate_thread.is_alive()
+            if gate_thread is not None and not gate_open:
+                # 방금 차단봉이 닫힘 → 닫힌 직후 같은 차를 다시 보내지 않도록
+                gate_thread = None
+                ocr.clear()
+                last_checked_time = time.time()
+
+            # OCR은 차가 있고 차단봉이 닫혀 있을 때만
             has_car = car_present()
-            if has_car:
-                plate, conf = read_4digit_plate(crop_roi(frame))
-            else:
-                plate, conf = None, 0.0
+            if has_car and not gate_open:
+                ocr.submit(frame.copy())
+            elif not has_car:
                 last_checked_plate = None  # 차가 떠나면 같은 번호도 다시 확인 가능
 
-            if SHOW_PREVIEW and draw_preview(frame, plate, conf, has_car) == ord('q'):
-                break
+            if SHOW_PREVIEW:
+                plate, conf = ocr.latest() if has_car else (None, 0.0)
+                if draw_preview(frame, plate, conf, has_car, gate_open) == ord('q'):
+                    break
 
+            result = ocr.take_result()
+            if gate_open or result is None:
+                continue
+            plate, conf = result
             if not plate or conf < OCR_MIN_CONFIDENCE:
-                time.sleep(0.2)
                 continue
 
             # 같은 번호판을 연속 중복 요청하지 않도록 쿨타임 적용
             if plate == last_checked_plate and time.time() - last_checked_time < SAME_PLATE_COOLDOWN:
-                time.sleep(0.2)
                 continue
 
             last_checked_plate = plate
@@ -206,13 +238,15 @@ def main():
 
             print("[서버 응답]", res.get("message"))
             if res.get("gate_action") == "OPEN":
-                open_and_auto_close_gate(cap)
-                last_checked_time = time.time()  # 닫힌 직후 같은 차를 다시 보내지 않도록
-
-            time.sleep(0.2)
+                gate_thread = threading.Thread(target=open_and_auto_close_gate, daemon=True)
+                gate_thread.start()
     finally:
+        ocr.running = False
         cap.release()
         set_servo(SERVO_CLOSED_ANGLE)
+        if servo is not None:
+            time.sleep(SERVO_MOVE_SECONDS)  # 닫히는 동작이 끝난 뒤 종료
+            servo.close()
         if sensor is not None:
             sensor.close()
         if SHOW_PREVIEW:
