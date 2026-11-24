@@ -5,12 +5,18 @@
 - 서버가 OPEN을 돌려주면 차단봉을 열고, 초음파 센서로 차가 지나간 것을 확인한 뒤 닫고 서버에 CLOSED 보고
 - USE_ULTRASONIC = False이면 예전 방식 (항상 OCR, 열고 GATE_OPEN_SECONDS 뒤 닫기)
 """
+import sys
 import time
+from pathlib import Path
 
 import cv2
 import requests
 
 from plate_ocr import read_4digit_plate
+
+# hardware/gate_servo.py (차단봉 서보 모듈) 불러오기
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hardware"))
+from gate_servo import GateServo  # noqa: E402
 
 # 라즈베리파이 실제 연결 시 True로 변경 (PC 테스트 시 False)
 USE_HARDWARE_SERVO = False
@@ -30,7 +36,7 @@ PLATE_ROI = None             # 예: (160, 120, 480, 360)
 OCR_MIN_CONFIDENCE = 0.70    # 서버와 같은 기준
 GATE_OPEN_SECONDS = 5        # 차단봉 열림 유지 시간
 SAME_PLATE_COOLDOWN = 10     # 같은 번호판 재요청 간격(초)
-SERVO_OPEN_ANGLE = 90
+SERVO_OPEN_ANGLE = 90        # 실제 각도 (hardware/gate_servo.py 로 단독 테스트하며 조정)
 SERVO_CLOSED_ANGLE = 0
 
 # ── 초음파 센서 설정 ──
@@ -42,15 +48,10 @@ MIN_OPEN_SECONDS = 2         # 열린 뒤 최소 유지 시간 (센서 순간 �
 CLEAR_HOLD_SECONDS = 1.0     # 차가 안 보이는 상태가 이만큼 계속되면 '통과 완료'로 보고 닫음
 GATE_MAX_WAIT_SECONDS = 30   # 열고 나서 차가 계속 안 지나가면 경고 출력 간격
 
-servo = None
-if USE_HARDWARE_SERVO:
-    from gpiozero import AngularServo
-    # 서보 떨림이 심하면 pigpio 사용 권장:
-    #   sudo pigpiod 실행 후 아래 두 줄 주석 해제
-    # from gpiozero.pins.pigpio import PiGPIOFactory
-    # from gpiozero import Device; Device.pin_factory = PiGPIOFactory()
-    servo = AngularServo(18, min_angle=0, max_angle=90, min_pulse_width=0.0005, max_pulse_width=0.0025)
-    servo.angle = SERVO_CLOSED_ANGLE  # 초기 상태: 닫힘
+# 차단봉 서보 (USE_HARDWARE_SERVO = False 이면 화면 출력만 하는 가상 서보)
+# 초기 상태: 닫힘. 떨림 방지·pigpio 설정은 hardware/gate_servo.py 참고
+gate = GateServo(use_hardware=USE_HARDWARE_SERVO,
+                 open_angle=SERVO_OPEN_ANGLE, closed_angle=SERVO_CLOSED_ANGLE)
 
 
 sensor = None
@@ -101,11 +102,6 @@ def wait_until_car_passes():
         time.sleep(0.1)
 
 
-def set_servo(angle):
-    if servo is not None:
-        servo.angle = angle
-
-
 def flush_camera(cap, count=5):
     """차단봉이 열려 있던 동안 쌓인 옛날 프레임 버리기"""
     for _ in range(count):
@@ -114,10 +110,10 @@ def flush_camera(cap, count=5):
 
 def open_and_auto_close_gate(cap):
     print(f">>> [서보모터] 입구 차단봉 열림 ({SERVO_OPEN_ANGLE}도)")
-    set_servo(SERVO_OPEN_ANGLE)
+    gate.open()
     wait_until_car_passes()  # 초음파로 통과 확인 (센서 없으면 GATE_OPEN_SECONDS 대기)
     print(f">>> [서보모터] 입구 차단봉 닫힘 ({SERVO_CLOSED_ANGLE}도)")
-    set_servo(SERVO_CLOSED_ANGLE)
+    gate.close()
 
     try:
         requests.post(f"{SERVER_URL}/api/gate/status", json={"status": "CLOSED"}, timeout=2)
@@ -212,7 +208,12 @@ def main():
             time.sleep(0.2)
     finally:
         cap.release()
-        set_servo(SERVO_CLOSED_ANGLE)
+        # 종료할 때도 차가 차단봉 아래에 있으면 내리지 않음
+        if gate.is_open and sensor is not None and car_present():
+            print("[종료] 차량이 차단봉 아래에 있어 열린 상태로 둡니다.")
+        else:
+            gate.close()
+        gate.cleanup()
         if sensor is not None:
             sensor.close()
         if SHOW_PREVIEW:
