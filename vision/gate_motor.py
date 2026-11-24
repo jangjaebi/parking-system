@@ -23,9 +23,9 @@ SERVO_TYPE = "continuous"     # "continuous"(360도 연속회전) / "positional"
 
 # ── 연속회전 서보 설정 (servo_test.py로 차단봉이 딱 90도 움직이도록 맞추기) ──
 SPEED = 0.5                   # 회전 속도 0.1 ~ 1.0 (너무 빠르면 멈추는 위치가 들쭉날쭉)
-OPEN_SECONDS = 0.30           # 올릴 때 도는 시간 (90도가 되도록)
-CLOSE_SECONDS = 0.30          # 내릴 때 도는 시간 (차단봉 무게 때문에 올릴 때와 다를 수 있음)
-OPEN_DIRECTION = 1            # 올릴 때 반대로 돌면 -1로
+OPEN_SECONDS = 0.08           # 올릴 때 도는 시간 (90도가 되도록)
+CLOSE_SECONDS = 0.09          # 내릴 때 도는 시간 (차단봉 무게 때문에 올릴 때와 다를 수 있음)
+OPEN_DIRECTION = -1            # 올릴 때 반대로 돌면 -1로
 
 # ── 일반 서보 설정 ──
 CLOSED_ANGLE = 0              # 내림
