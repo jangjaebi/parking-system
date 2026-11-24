@@ -34,10 +34,19 @@
 .demo-tools>strong{font-size:12px;color:#456655;margin-bottom:3px}
 .demo-tools .demo-action{margin:0;width:100%;min-height:43px}
 
-/* 무단 주차 · 번호판 불일치 표시 */
-.dot.unauthorized{background:#d0464a}
-.mini-parking .unauthorized,.mini-parking .mismatch{background:#ffd6d6;border-color:#d0464a;color:#a3282c}
-.spot-square.unauthorized,.spot-square.mismatch{background:#ffe8e8;color:#c83a3e}
-.status-label.unauthorized,.status-label.mismatch{color:#c83a3e}
+/* 주차 단계 · 경보 표시 */
+.dot.parking{background:#3c7dd9}
+.dot.alarm{background:#d0464a}
+.mini-parking .parking{background:#d6e8ff;border-color:#3c7dd9;color:#24589f}
+.mini-parking .parked{background:#d7dee1;border-color:#9aa9b1;color:#63737b}
+.mini-parking .alarm,.mini-parking .unreserved{background:#ffd6d6;border-color:#d0464a;color:#a3282c}
+.spot-square.parking{background:#e6f0ff;color:#3c7dd9}
+.spot-square.parked{background:#eef0f2;color:#87939b}
+.spot-square.alarm,.spot-square.unreserved{background:#ffe8e8;color:#c83a3e}
+.status-label.parking{color:#3c7dd9}
+.status-label.parked{color:#8b99a0}
+.status-label.alarm,.status-label.unreserved{color:#c83a3e}
 .text-danger{color:#c83a3e}
 .alert-box{display:flex;align-items:center;gap:8px;background:#fff1f1;border:1px solid #f2c2c3;color:#b3302f;border-radius:14px;padding:12px 14px;font-size:12px;font-weight:700;margin:-8px 0 22px}
+.ticket-card .alert-box{margin:14px 0 6px}
+.ticket-card .primary{margin-top:16px}
