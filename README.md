@@ -42,7 +42,7 @@ Raspberry Pi-based Smart Parking Reservation and Management System
 
 | 부품 | 부품 쪽 핀 | 라즈베리파이 | 물리 핀 번호 |
 |---|---|---|---|
-| 서보모터 SG90 (차단봉) | 주황/노랑 (신호) | **GPIO18** | 12 |
+| 서보모터 (차단봉) | 주황/노랑 (신호) | **GPIO18** | 12 |
 | | 빨강 (전원) | 5V | 2 |
 | | 갈색 (GND) | GND | 6 |
 | 초음파 센서 HC-SR04 | Trig | **GPIO23** | 16 |
@@ -54,11 +54,19 @@ Raspberry Pi-based Smart Parking Reservation and Management System
 
 - **Echo는 5V 신호**라서 라즈베리파이(3.3V)에 바로 꽂으면 안 돼요. `Echo → 1kΩ → GPIO24`, `GPIO24 → 2kΩ → GND`로 나눠서 연결하세요.
 - 5V 핀은 2번과 4번 두 개라 서보와 초음파에 하나씩 쓰면 돼요. GND는 6, 9, 14, 20, 25, 30, 34, 39번 중 아무 곳이나 써도 돼요.
-- 핀을 바꾸면 `vision/enter_gate.py` 위쪽의 `SERVO_PIN`, `TRIG_PIN`, `ECHO_PIN`을 같이 바꾸세요.
+- 핀을 바꾸면 서보는 `vision/gate_motor.py`의 `SERVO_PIN`, 초음파는 `vision/enter_gate.py`의 `TRIG_PIN`, `ECHO_PIN`을 바꾸세요.
+
+### 차단봉 모터 종류
+`vision/gate_motor.py`의 `SERVO_TYPE`으로 고릅니다.
+- `"continuous"` (기본값): **360도 연속회전 서보**. 각도 대신 "몇 초 동안 돌리기"로 올리고 내립니다.
+  위치를 기억하지 못하므로 **프로그램을 켜기 전에 차단봉을 내린 상태로** 맞춰 두세요.
+- `"positional"`: 일반 0~180도 서보. 각도로 올리고 내립니다.
+- 90도 올라간 뒤 내려올 때 같은 방향으로 계속 돌아 한 바퀴를 채운다면 연속회전 서보예요.
 
 ### 부품 단독 테스트
 ```bash
-python3 hardware/servo_test.py     # 차단봉: o 올림 / c 내림 / 숫자로 각도 → 맞는 각도를 enter_gate.py에 적기
+python3 hardware/servo_check.py    # 모터 종류 확인 (일반 / 360도 연속회전) → gate_motor.py 설정 자동 변경
+python3 hardware/servo_test.py     # 차단봉: o 올림 / c 내림 / + - 조금씩 → gate_motor.py의 OPEN_SECONDS·CLOSE_SECONDS 맞추기
 python3 hardware/ultrasonic.py     # 초음파: 거리(cm) 출력 → CAR_DISTANCE_CM 정하기
 ```
 라즈베리파이에서 실제로 움직이려면 `enter_gate.py`의 `USE_HARDWARE_SERVO = True`, `USE_ULTRASONIC = True`로 바꾸세요.

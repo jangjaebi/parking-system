@@ -12,21 +12,18 @@ import cv2
 import requests
 
 from camera_util import BackgroundOcr, camera_index_from_args, open_camera
+from gate_motor import GateMotor
 from plate_ocr import read_4digit_plate
 
 # ── 하드웨어 사용 여부 (라즈베리파이에서 True, 노트북 테스트 시 False) ──
-USE_HARDWARE_SERVO = False   # 차단봉 서보모터 (SG90)
+USE_HARDWARE_SERVO = False   # 차단봉 서보모터 (종류·핀·회전 시간은 vision/gate_motor.py에서 설정)
 USE_ULTRASONIC = False       # 초음파 센서 (HC-SR04)
 
 # ── 핀 번호 (BCM 번호 = 확장보드에 적힌 GPIO 번호) ──
-SERVO_PIN = 18               # 서보 신호선(주황/노랑) → GPIO18 (물리 12번 핀)
+# 서보 신호선 → GPIO18 (물리 12번 핀) : vision/gate_motor.py의 SERVO_PIN
 TRIG_PIN = 23                # 초음파 Trig → GPIO23 (물리 16번 핀)
 ECHO_PIN = 24                # 초음파 Echo → GPIO24 (물리 18번 핀) ※ 저항 분압으로 3.3V로 낮춰 연결
 
-# ── 차단봉 각도 (hardware/servo_test.py로 모형에 맞는 값을 찾아서 적기) ──
-SERVO_CLOSED_ANGLE = 0       # 차단봉 내림 (가로)
-SERVO_OPEN_ANGLE = 90        # 차단봉 올림 (세로). 반대로 움직이면 두 값을 바꾸거나 OPEN을 180으로
-SERVO_MOVE_SECONDS = 0.6     # 움직인 뒤 이 시간이 지나면 신호를 끊어 '지지직' 떨림 방지
 # 카메라 화면 미리보기 창 (번호판 영역 맞출 때 True, 모니터 없는 라즈베리파이에서는 False)
 SHOW_PREVIEW = True
 
@@ -44,22 +41,13 @@ SAME_PLATE_COOLDOWN = 10     # 같은 번호판 재요청 간격(초)
 
 # ── 초음파 센서 설정 ──
 # 센서는 차단봉 바로 옆에서 차로를 가로질러 보도록 설치 (차가 차단봉 앞에 서 있으면 감지됨)
-CAR_DISTANCE_CM = 7         # 이 거리보다 가까우면 '차 있음' (모형 차로 폭에 맞게 조정)
+CAR_DISTANCE_CM = 8         # 이 거리보다 가까우면 '차 있음' (모형 차로 폭에 맞게 조정)
 MIN_OPEN_SECONDS = 2         # 열린 뒤 최소 유지 시간 (센서 순간 오측정으로 바로 닫히는 것 방지)
 CLEAR_HOLD_SECONDS = 1.0     # 차가 안 보이는 상태가 이만큼 계속되면 '통과 완료'로 보고 닫음
 GATE_MAX_WAIT_SECONDS = 30   # 열고 나서 차가 계속 안 지나가면 경고 출력 간격
 
-servo = None
-if USE_HARDWARE_SERVO:
-    from gpiozero import AngularServo
-    # 서보 떨림이 심하면 pigpio 사용 권장:
-    #   sudo pigpiod 실행 후 아래 두 줄 주석 해제
-    # from gpiozero.pins.pigpio import PiGPIOFactory
-    # from gpiozero import Device; Device.pin_factory = PiGPIOFactory()
-    # SG90: 0.5ms = 0도, 2.5ms = 180도 (예전 코드는 0~90도로 잡혀 있어서 '90도'가 실제로는 180도 회전했음)
-    servo = AngularServo(SERVO_PIN, min_angle=0, max_angle=180,
-                         min_pulse_width=0.0005, max_pulse_width=0.0025,
-                         initial_angle=SERVO_CLOSED_ANGLE)  # 시작할 때 닫힘
+# 차단봉 모터 (연속회전 서보는 시작 전에 차단봉을 '내린 상태'로 맞춰 두기)
+gate = GateMotor(use_hardware=USE_HARDWARE_SERVO)
 
 
 sensor = None
@@ -110,29 +98,11 @@ def wait_until_car_passes():
         time.sleep(0.1)
 
 
-_servo_timer = None
-
-
-def set_servo(angle):
-    """서보를 angle도로 움직이고, 잠시 뒤 신호를 끊음 (SG90은 신호를 계속 주면 떨림)"""
-    global _servo_timer
-    if servo is None:
-        return
-    if _servo_timer is not None:
-        _servo_timer.cancel()
-    servo.angle = angle
-    _servo_timer = threading.Timer(SERVO_MOVE_SECONDS, servo.detach)
-    _servo_timer.daemon = True
-    _servo_timer.start()
-
-
 def open_and_auto_close_gate():
     """차단봉 열기 → 차 통과 대기 → 닫기 → 서버에 보고 (별도 스레드에서 실행되어 화면은 멈추지 않음)"""
-    print(f">>> [서보모터] 입구 차단봉 열림 ({SERVO_OPEN_ANGLE}도)")
-    set_servo(SERVO_OPEN_ANGLE)
+    gate.open()
     wait_until_car_passes()  # 초음파로 통과 확인 (센서 없으면 GATE_OPEN_SECONDS 대기)
-    print(f">>> [서보모터] 입구 차단봉 닫힘 ({SERVO_CLOSED_ANGLE}도)")
-    set_servo(SERVO_CLOSED_ANGLE)
+    gate.close()
 
     try:
         requests.post(f"{SERVER_URL}/api/gate/status", json={"status": "CLOSED"}, timeout=2)
@@ -174,7 +144,7 @@ def main():
         return
 
     print("입구 OCR 카메라 및 차단봉 시스템 가동 시작...")
-    print(f"서보모터: {'GPIO ' + str(SERVO_PIN) if servo else '미사용 (터미널 출력만)'}")
+    print(f"차단봉 모터: {gate.describe()}")
     print(f"초음파 센서: {'사용 (' + str(CAR_DISTANCE_CM) + 'cm 이내 감지 시 OCR)' if sensor else '미사용 (항상 OCR)'}")
     last_checked_plate = None
     last_checked_time = 0.0
@@ -243,10 +213,7 @@ def main():
     finally:
         ocr.running = False
         cap.release()
-        set_servo(SERVO_CLOSED_ANGLE)
-        if servo is not None:
-            time.sleep(SERVO_MOVE_SECONDS)  # 닫히는 동작이 끝난 뒤 종료
-            servo.close()
+        gate.cleanup()  # 올라가 있으면 내리고 종료
         if sensor is not None:
             sensor.close()
         if SHOW_PREVIEW:
