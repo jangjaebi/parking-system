@@ -11,6 +11,8 @@ SPACES = ['A1', 'A2', 'A3', 'A4', 'A5']
 EXTRA_COLUMNS = {
     "entry_status": "TEXT DEFAULT 'NONE'",
     "reserved_at": "TIMESTAMP",
+    "ocr_status": "TEXT DEFAULT 'NONE'",
+    "detected_car_number": "TEXT",
 }
 
 

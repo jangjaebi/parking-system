@@ -19,11 +19,11 @@ SHOW_PREVIEW = True          # 칸 좌표 맞출 때 True (r: 기준 화면 다�
 
 # 카메라 화면(640x480) 내 A1~A5 주차칸 좌표 (x1, y1, x2, y2) — 모형에 맞게 SHOW_PREVIEW로 확인하며 조정
 PARKING_ROIS = {
-    "A1": (20,  150, 130, 350),
-    "A2": (140, 150, 250, 350),
-    "A3": (260, 150, 370, 350),
-    "A4": (380, 150, 490, 350),
-    "A5": (500, 150, 610, 350),
+    "A1": (108, 141, 202, 448),
+    "A2": (282, 121, 420, 445),
+    "A3": (506, 104, 686, 453),
+    "A4": (758, 105, 932, 450),
+    "A5": (1011, 116, 1147, 442),
 }
 
 PIXEL_DIFF_THRESHOLD = 30    # 기준 화면과 픽셀 밝기 차이 기준
@@ -97,8 +97,8 @@ def draw_preview(frame, reported):
 
 def main():
     cap = cv2.VideoCapture(LOT_CAM_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
     if not cap.isOpened():
         print(f"내부 감시 카메라({LOT_CAM_INDEX}번)를 열 수 없습니다.")
